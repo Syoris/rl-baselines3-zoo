@@ -1,4 +1,5 @@
 import argparse
+from datetime import datetime
 import difflib
 import importlib
 import os
@@ -204,7 +205,10 @@ def train() -> None:
                 "if you want to use Weights & Biases to track experiment, please install W&B via `pip install wandb`"
             ) from e
 
-        run_name = f"{args.env}__{args.algo}__{args.seed}__{int(time.time())}"
+        current_time = datetime.now().strftime("%y%m%d-%H%M%S")
+        run_name = f"{args.env}__{args.algo}__{current_time}"
+        # run_name = f"{args.env}__{args.algo}__{int(time.time())}"
+
         tags = [*args.wandb_tags, f"v{sb3.__version__}"]
         run = wandb.init(
             name=run_name,
@@ -216,6 +220,7 @@ def train() -> None:
             monitor_gym=True,  # auto-upload the videos of agents playing the game
             save_code=True,  # optional
         )
+
         args.tensorboard_log = f"runs/{run_name}"
 
     exp_manager = ExperimentManager(
@@ -269,8 +274,30 @@ def train() -> None:
 
         # Normal training
         if model is not None:
+            # Set actor's last layer to 0 (MY MODIFICATION)
+            if args.algo == "ppo":
+                model.policy.state_dict()["action_net.weight"].zero_()
+                model.policy.state_dict()["action_net.bias"].zero_()
+                # model.policy.state_dict()["value_net.weight"].zero_()
+                # model.policy.state_dict()["value_net.bias"].zero_()
+
+            else:
+                n_keys = len(
+                    [x for x in model.policy.state_dict().keys() if "actor_target" in x]
+                )  # Number of layers in network
+                if n_keys > 0:
+                    last_layer_num = n_keys - 2  # Last layer number
+                    model.policy.state_dict()[f"actor.mu.{last_layer_num}.weight"].zero_()
+                    model.policy.state_dict()[f"actor.mu.{last_layer_num}.bias"].zero_()
+                    model.policy.state_dict()[f"actor_target.mu.{last_layer_num}.weight"].zero_()
+                    model.policy.state_dict()[f"actor_target.mu.{last_layer_num}.bias"].zero_()
+
+            # Train the agent
             exp_manager.learn(model)
             exp_manager.save_trained_model(model)
+
+        if args.track:
+            run.finish()
     else:
         exp_manager.hyperparameters_optimization()
 
