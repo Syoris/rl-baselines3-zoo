@@ -1,20 +1,22 @@
 import argparse
 import importlib
 import os
+from pathlib import Path
 import sys
 
 import numpy as np
 import torch as th
 import yaml
 from huggingface_sb3 import EnvironmentName
-from stable_baselines3.common.callbacks import tqdm
+from stable_baselines3.common.callbacks import tqdm, EvalLoggingCallback
 from stable_baselines3.common.utils import set_random_seed
+from stable_baselines3.common.vec_env import VecNormalize
 
 import rl_zoo3.import_envs  # noqa: F401 pylint: disable=unused-import
 from rl_zoo3 import ALGOS, create_test_env, get_saved_hyperparams
 from rl_zoo3.exp_manager import ExperimentManager
 from rl_zoo3.load_from_hub import download_from_hub
-from rl_zoo3.utils import StoreDict, get_model_path
+from rl_zoo3.utils import StoreDict, get_model_path, get_latest_run_id
 
 
 def enjoy() -> None:  # noqa: C901
@@ -65,6 +67,13 @@ def enjoy() -> None:  # noqa: C901
     )
     parser.add_argument(
         "--custom-objects", action="store_true", default=False, help="Use custom objects to solve loading issues"
+    )
+    parser.add_argument(
+        "-E",
+        "--eval",
+        action="store_true",
+        default=False,
+        help="if toggled, evaluates the agent",
     )
     parser.add_argument(
         "-P",
@@ -186,6 +195,17 @@ def enjoy() -> None:  # noqa: C901
             "clip_range": lambda _: 0.0,
         }
 
+    # Evaluation callback
+    if args.eval:
+        log_folder = Path("logs") / algo / "eval"
+        log_folder = log_folder / f"{env_name}_{get_latest_run_id(log_folder, env_name) + 1}"
+
+        # vars_to_plot = hyperparams["callback"][0]['rl_contact.LoggingCallback.LoggingCallback']['vars_to_plot']
+        logging_callback = EvalLoggingCallback(log_dir=log_folder, plot_log_interval=10, is_eval=True)
+
+    else:
+        logging_callback = None
+
     if "HerReplayBuffer" in hyperparams.get("replay_buffer_class", ""):
         kwargs["env"] = env
 
@@ -219,6 +239,12 @@ def enjoy() -> None:  # noqa: C901
                 deterministic=deterministic,
             )
             obs, reward, done, infos = env.step(action)
+
+            if logging_callback is not None:
+                if isinstance(env, VecNormalize):
+                    # Unnormalize action
+                    obs = env.get_original_obs()
+                logging_callback.on_step([obs], infos, reward, done)
 
             episode_start = done
 
@@ -268,6 +294,9 @@ def enjoy() -> None:  # noqa: C901
 
     if args.verbose > 0 and len(episode_lengths) > 0:
         print(f"Mean episode length: {np.mean(episode_lengths):.2f} +/- {np.std(episode_lengths):.2f}")
+
+    if args.verbose > 0 and args.eval:
+        logging_callback.print_results()
 
     env.close()
 
