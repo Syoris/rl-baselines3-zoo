@@ -244,7 +244,10 @@ def enjoy() -> None:  # noqa: C901
                 if isinstance(env, VecNormalize):
                     # Unnormalize action
                     unormalized_obs = env.get_original_obs()
-                logging_callback.on_step([unormalized_obs], infos, reward, done)
+                    logging_callback.on_step([unormalized_obs], infos, reward, done)
+
+                else:
+                    logging_callback.on_step([obs], infos, reward, done)
 
             episode_start = done
 
